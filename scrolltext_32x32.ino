@@ -40,7 +40,8 @@ typedef enum
   MODE_SET_HOUR,
   MODE_WAIT_HOUR_RELEASE,
   MODE_SET_MINUTE,
-  MODE_WAIT_NORMAL_RELEASE
+  MODE_WAIT_NORMAL_RELEASE,
+  MODE_SOUND_CALIBRATION
 } mode_type;
 
 mode_type current_mode=MODE_NORMAL;
@@ -53,6 +54,8 @@ int button_state;
 unsigned long button_press_start=0;
 
 #define ENVELOPE_PIN A5
+int max_sound_level;
+int min_sound_level;
 
 void setup() {
   matrix.begin();
@@ -65,6 +68,9 @@ void setup() {
   // draw the "zeroth" pixel for the second hand.  Only needed on boot.
   matrix.drawPixel(1,20,matrix.Color333(0,1,0));
   display_time();
+
+  start_sound_calibration();
+  
 }
 
 void display_time( void )
@@ -331,15 +337,52 @@ void process_audio_envelope_bars( void )
   // gonna do a 4-pixel wide bar. 
   // First take:  all one color.  Blue.
 
-  // Okay, map is cool, but we *could* just take one byte and right-shift by 3...
-  //bar_length = map(envelope_level, 0, 255, 0, 32);
-  bar_length = envelope_level >> 3;
-
+  // mat the input to the calibrated levels.
+  bar_length = map(envelope_level, min_sound_level, max_sound_level, 0, 32);
+  
   // erase old rectangle
   matrix.fillRect(0,23,32,8,0);
   
   // draw new rectangle
   matrix.fillRect(0,23,bar_length,4,matrix.Color333(0,0,1));
+}
+
+bool calibrate_sound_levels( void )
+{
+  int current_level;
+
+  // calibrate until the button is pressed.
+  if (digitalRead(BUTTON_PIN) == LOW)
+  {
+    current_mode = MODE_NORMAL;
+    return true;
+  }
+
+  current_level = analogRead(ENVELOPE_PIN);
+
+  if (current_level > max_sound_level) max_sound_level = current_level;
+  if (current_level < min_sound_level) min_sound_level = current_level;
+
+  
+  matrix.setCursor(0,23);
+  matrix.fillRect(0,23,32,8,0);
+  matrix.print(min_sound_level);
+  matrix.print(" ");
+  matrix.print(max_sound_level);
+
+  return false;
+  
+}
+
+void start_sound_calibration( void )
+{
+  matrix.setCursor(0,0);
+  matrix.fillRect(0,0,32,8,0);
+  matrix.print("CALIB.");
+  
+  max_sound_level=-1;
+  min_sound_level=256;
+  current_mode = MODE_SOUND_CALIBRATION;
 }
 
 void loop() 
@@ -410,6 +453,10 @@ void loop()
          // amd draw the "zeroth" pixel
          matrix.drawPixel(1,20,matrix.Color333(0,1,0));
       }
+    break;
+
+    case MODE_SOUND_CALIBRATION:
+      calibrate_sound_levels();
     break;
     
   }
