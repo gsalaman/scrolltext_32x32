@@ -45,12 +45,14 @@ typedef enum
 
 mode_type current_mode=MODE_NORMAL;
 
-// We'll use pin A5 as our button pin.
-#define BUTTON_PIN A5
+// button used for setting time
+#define BUTTON_PIN 12
 int button_state;
 
 #define BUTTON_HOLD_TIME 1000
 unsigned long button_press_start=0;
+
+#define ENVELOPE_PIN A5
 
 void setup() {
   matrix.begin();
@@ -302,8 +304,49 @@ void set_minute( void )
 
   button_state = current_button_state;
 }
+
+void process_audio_envelope_text( void )
+{
+  // test code to display envelope levles.
+  int envelope_level;
+  static int max_envelope=0;
+
+  envelope_level = analogRead(ENVELOPE_PIN);
+  if (envelope_level > max_envelope) max_envelope = envelope_level;
+
+  matrix.setCursor(0,23);
+  matrix.fillRect(0,23,32,8,0);
+  matrix.print(envelope_level);
+  matrix.print(" ");
+  matrix.print(max_envelope);
+}
+
+void process_audio_envelope_bars( void )
+{
+  int envelope_level;
+  int bar_length;
+  // gives 0-255
+  envelope_level = analogRead(ENVELOPE_PIN);
+
+  // gonna do a 4-pixel wide bar. 
+  // First take:  all one color.  Blue.
+
+  // Okay, map is cool, but we *could* just take one byte and right-shift by 3...
+  //bar_length = map(envelope_level, 0, 255, 0, 32);
+  bar_length = envelope_level >> 3;
+
+  // erase old rectangle
+  matrix.fillRect(0,23,32,8,0);
+  
+  // draw new rectangle
+  matrix.fillRect(0,23,bar_length,4,matrix.Color333(0,0,1));
+}
+
 void loop() 
 {
+
+  process_audio_envelope_bars();
+  
   switch (current_mode)
   {
     case MODE_NORMAL:
