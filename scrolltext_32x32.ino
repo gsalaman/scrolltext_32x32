@@ -14,10 +14,21 @@
 #define B   A1
 #define C   A2
 #define D   A3
+
+/* Pin Mapping:
+ *  Sig   Uno  Mega
+ *  R0    2    24
+ *  G0    3    25
+ *  B0    4    26
+ *  R1    5    27
+ *  G1    6    28
+ *  B1    7    29
+ */
+
 // Last parameter = 'true' enables double-buffering, for flicker-free,
 // buttery smooth animation.  Note that NOTHING WILL SHOW ON THE DISPLAY
 // until the first call to swapBuffers().  This is normal.
-RGBmatrixPanel matrix(A, B, C,  D,  CLK, LAT, OE, false);
+RGBmatrixPanel matrix(A, B, C,  D,  CLK, LAT, OE, true);
 // Double-buffered mode consumes nearly all the RAM available on the
 // Arduino Uno -- only a handful of free bytes remain.  Even the
 // following string needs to go in PROGMEM:
@@ -54,10 +65,11 @@ int button_state;
 unsigned long button_press_start=0;
 
 #define ENVELOPE_PIN A5
-int max_sound_level;
-int min_sound_level;
+int max_sound_level=64;
+int min_sound_level=0;
 
-void setup() {
+void setup() 
+{
   matrix.begin();
   matrix.setTextWrap(false); // Allow text to run off right edge
   matrix.setTextSize(1);
@@ -69,8 +81,8 @@ void setup() {
   matrix.drawPixel(1,20,matrix.Color333(0,1,0));
   display_time();
 
-  start_sound_calibration();
-  
+  //start_sound_calibration();
+  //set_test_pattern();
 }
 
 void display_time( void )
@@ -192,10 +204,8 @@ void show_message( void )
   // Move text left (w/wrap)
   if((--textX) < textMin) textX = matrix.width();
 
-  // Update display
-  //matrix.swapBuffers(true);
-
-  delay(50);
+ 
+  //delay(50);
   
 }
 
@@ -381,19 +391,138 @@ void start_sound_calibration( void )
   matrix.print("CALIB.");
   
   max_sound_level=-1;
-  min_sound_level=256;
+
+  //  Want min at zero.
+  //min_sound_level=256;
+  min_sound_level=0;
   current_mode = MODE_SOUND_CALIBRATION;
+}
+
+#define NUM_SOUND_HISTORY_SAMPLES 32
+int sound_level_history[NUM_SOUND_HISTORY_SAMPLES]={0};  // Each sample is 0 through 7.
+int sound_level_current_sample=0;
+
+void add_sound_sample( int volume )
+{
+  sound_level_current_sample++;
+  sound_level_current_sample = sound_level_current_sample % NUM_SOUND_HISTORY_SAMPLES;
+  sound_level_history[sound_level_current_sample] = volume;
+}
+
+void show_sound_samples( void )
+{
+  // First iteration:  Current sound sample highlighted in red.  All the rest blue.
+
+  int i;
+  int temp_sample;
+  int16_t bar_color;
+
+  matrix.fillRect(0,23,32,32,0);
+    
+  for (i=0; i < NUM_SOUND_HISTORY_SAMPLES; i++)
+  {
+    temp_sample = sound_level_history[i];
+
+    if (i == sound_level_current_sample)
+    {
+      // latest sample is red.
+      bar_color = matrix.Color333(1,0,0);
+    }
+    else
+    {
+      // All other bars will be blue.
+      bar_color = matrix.Color333(0,0,1);
+    }
+
+    matrix.drawLine(i, (31-temp_sample), i, 32, bar_color);
+          
+  } // end of looping through sample buffer
+}
+
+void process_envelope_time( void )
+{
+  int envelope_level;
+  int bar_length;
+
+  // gives 0-255
+  envelope_level = analogRead(ENVELOPE_PIN);
+
+  // map the input to the calibrated levels... zero through 7
+  bar_length = map(envelope_level, min_sound_level, max_sound_level, 0, 7);
+
+  // store the sample
+  add_sound_sample(bar_length);
+
+  // ...and display our graph over time.
+  show_sound_samples();
+ 
+}
+
+#define LEVEL_1 8
+#define LEVEL_2 10
+#define LEVEL_3 12
+#define LEVEL_4 15
+#define LEVEL_5 20
+#define LEVEL_6 30
+#define LEVEL_7 40
+
+int map_envelope_to_bar( int input)
+{
+  if (input > LEVEL_7) return 7;
+  if (input > LEVEL_6) return 6;
+  if (input > LEVEL_5) return 5;
+  if (input > LEVEL_4) return 4;
+  if (input > LEVEL_3) return 3;
+  if (input > LEVEL_2) return 2;
+  if (input > LEVEL_1) return 1;
+
+  return 0;
+}
+
+void display_envelope_time( void )
+{
+  int envelope_level;
+  int bar_length;
+  
+  // gives 0-255
+  envelope_level = analogRead(ENVELOPE_PIN);
+
+  // map the input to the calibrated levels... zero through 7
+  //bar_length = map(envelope_level, min_sound_level, max_sound_level, 0, 7);
+  //bar_length = constrain(bar_length, 0, 7);
+  bar_length = map_envelope_to_bar(envelope_level);
+  
+  // store the sample
+  add_sound_sample(bar_length);
+
+  // ...and display our graph over time.
+
+  show_sound_samples();
+  
+}
+
+void set_test_pattern( void )
+{
+  int i;
+  int value=0;
+  for (i=0; i<NUM_SOUND_HISTORY_SAMPLES; i++)
+  {
+    sound_level_history[i]=value;
+    value++;
+    if (value == 8) value = 0;
+  }
 }
 
 void loop() 
 {
-
-  process_audio_envelope_bars();
+  //process_audio_envelope_bars();
   
   switch (current_mode)
   {
     case MODE_NORMAL:
       show_message();
+      display_envelope_time();
+       
       if (check_button_hold())
       {
         // let user know we're setting time
@@ -460,4 +589,8 @@ void loop()
     break;
     
   }
+
+  // Update display
+  matrix.swapBuffers(true);
+
 }
