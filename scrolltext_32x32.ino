@@ -52,10 +52,23 @@ typedef enum
   MODE_WAIT_HOUR_RELEASE,
   MODE_SET_MINUTE,
   MODE_WAIT_NORMAL_RELEASE,
-  MODE_SOUND_CALIBRATION
+  MODE_FULL_VIS
 } mode_type;
 
-mode_type current_mode=MODE_NORMAL;
+mode_type current_mode=MODE_FULL_VIS;
+
+typedef enum
+{
+  SOUND_MODE_ENVELOPE,
+  SOUND_MODE_FULL_VIS
+} sound_mode_type;
+sound_mode_type sound_mode;
+
+char *sound_mode_string[] =
+{
+  "ENV.",
+  "FULLV"
+};
 
 // button used for setting time
 #define BUTTON_PIN 12
@@ -64,9 +77,20 @@ int button_state;
 #define BUTTON_HOLD_TIME 1000
 unsigned long button_press_start=0;
 
+#define GAIN_PIN A15
+int gain=1;
+
 #define ENVELOPE_PIN A5
-int max_sound_level=64;
-int min_sound_level=0;
+#define AUDIO_PIN A4
+
+#define NUM_TIME_SAMPLES 32
+int time_samples[NUM_TIME_SAMPLES] = {0};
+#define TIME_SAMPLE_BIAS 512
+
+
+#define NUM_SOUND_HISTORY_SAMPLES 32
+int sound_level_history[NUM_SOUND_HISTORY_SAMPLES]={0};  // Each sample is 0 through 7.
+int sound_level_current_sample=0;
 
 void setup() 
 {
@@ -203,9 +227,6 @@ void show_message( void )
 
   // Move text left (w/wrap)
   if((--textX) < textMin) textX = matrix.width();
-
- 
-  //delay(50);
   
 }
 
@@ -321,6 +342,8 @@ void set_minute( void )
   button_state = current_button_state;
 }
 
+
+
 void process_audio_envelope_text( void )
 {
   // test code to display envelope levles.
@@ -348,7 +371,7 @@ void process_audio_envelope_bars( void )
   // First take:  all one color.  Blue.
 
   // mat the input to the calibrated levels.
-  bar_length = map(envelope_level, min_sound_level, max_sound_level, 0, 32);
+  bar_length = map(envelope_level, 0, 64, 0, 32);
   
   // erase old rectangle
   matrix.fillRect(0,23,32,8,0);
@@ -357,50 +380,7 @@ void process_audio_envelope_bars( void )
   matrix.fillRect(0,23,bar_length,4,matrix.Color333(0,0,1));
 }
 
-bool calibrate_sound_levels( void )
-{
-  int current_level;
 
-  // calibrate until the button is pressed.
-  if (digitalRead(BUTTON_PIN) == LOW)
-  {
-    current_mode = MODE_NORMAL;
-    return true;
-  }
-
-  current_level = analogRead(ENVELOPE_PIN);
-
-  if (current_level > max_sound_level) max_sound_level = current_level;
-  if (current_level < min_sound_level) min_sound_level = current_level;
-
-  
-  matrix.setCursor(0,23);
-  matrix.fillRect(0,23,32,8,0);
-  matrix.print(min_sound_level);
-  matrix.print(" ");
-  matrix.print(max_sound_level);
-
-  return false;
-  
-}
-
-void start_sound_calibration( void )
-{
-  matrix.setCursor(0,0);
-  matrix.fillRect(0,0,32,8,0);
-  matrix.print("CALIB.");
-  
-  max_sound_level=-1;
-
-  //  Want min at zero.
-  //min_sound_level=256;
-  min_sound_level=0;
-  current_mode = MODE_SOUND_CALIBRATION;
-}
-
-#define NUM_SOUND_HISTORY_SAMPLES 32
-int sound_level_history[NUM_SOUND_HISTORY_SAMPLES]={0};  // Each sample is 0 through 7.
-int sound_level_current_sample=0;
 
 void add_sound_sample( int volume )
 {
@@ -439,6 +419,7 @@ void show_sound_samples( void )
   } // end of looping through sample buffer
 }
 
+#if 0
 void process_envelope_time( void )
 {
   int envelope_level;
@@ -457,6 +438,7 @@ void process_envelope_time( void )
   show_sound_samples();
  
 }
+#endif
 
 #define LEVEL_1 8
 #define LEVEL_2 10
@@ -501,21 +483,75 @@ void display_envelope_time( void )
   
 }
 
-void set_test_pattern( void )
+void read_gain( void )
+{
+   int raw_gain;
+
+   raw_gain = analogRead(GAIN_PIN);
+   gain = map(raw_gain, 0, 1023, 1, 32);
+}
+
+void collect_samples( void )
 {
   int i;
-  int value=0;
-  for (i=0; i<NUM_SOUND_HISTORY_SAMPLES; i++)
+  for (i = 0; i < NUM_TIME_SAMPLES; i++)
   {
-    sound_level_history[i]=value;
-    value++;
-    if (value == 8) value = 0;
+    time_samples[i] = analogRead(AUDIO_PIN);
   }
+}
+
+// Mapped sample should give a number between 0 and 31
+int map_sample( int input )
+{
+  int mapped_sample;
+  
+  // Looks like our samples are quiet, so I'm gonna start with a very quiet mapping.
+
+  // start by taking out DC bias.  This will make negative #s...
+  mapped_sample = input - TIME_SAMPLE_BIAS;
+
+  // Now make this a 0-31 number.  
+
+  // add in gain.
+  mapped_sample = mapped_sample / gain;
+  
+  // center on 16.
+  mapped_sample = mapped_sample + 16;
+
+  // and clip.
+  if (mapped_sample > 31) mapped_sample = 31;
+  if (mapped_sample < 0) mapped_sample = 0;
+
+  return mapped_sample;
+}
+
+void show_samples_lines_fullscreen( void )
+{
+  int x;
+  int y;
+  int last_x=0;
+  int last_y=16;
+
+  matrix.fillScreen(0);
+  
+  for (x=0; x < NUM_TIME_SAMPLES; x++)
+  {
+    y=map_sample(time_samples[x]);
+    matrix.drawLine(last_x,last_y,x,y,matrix.Color333(0,0,1));
+    last_x = x;
+    last_y = y;
+  }
+}
+
+void run_full_vis( void )
+{
+  collect_samples();
+  show_samples_lines_fullscreen();
 }
 
 void loop() 
 {
-  //process_audio_envelope_bars();
+  read_gain();
   
   switch (current_mode)
   {
@@ -526,10 +562,10 @@ void loop()
       if (check_button_hold())
       {
         // let user know we're setting time
-        matrix.fillRect(0,0,32,10,0);
+        matrix.fillScreen(0);
         matrix.setCursor(0,0);
-        matrix.print("LetGo");    
-        
+        matrix.print("LetGo");
+            
         current_mode = MODE_ENTER_TIME_SET;
       }      
     break;
@@ -584,8 +620,19 @@ void loop()
       }
     break;
 
-    case MODE_SOUND_CALIBRATION:
-      calibrate_sound_levels();
+    case MODE_FULL_VIS:
+      run_full_vis();
+      if (check_button_hold())
+      {
+        // let user know we're setting time
+        matrix.fillScreen(0);
+        matrix.setCursor(0,0);
+        matrix.print("LetGo");    
+
+        display_time();
+        
+        current_mode = MODE_ENTER_TIME_SET;
+      }
     break;
     
   }
