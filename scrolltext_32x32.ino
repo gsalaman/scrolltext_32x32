@@ -501,16 +501,13 @@ void collect_samples( void )
 }
 
 // Mapped sample should give a number between 0 and 31
+// input is the input from the ADC...0 to 1023.
 int map_sample( int input )
 {
   int mapped_sample;
-  
-  // Looks like our samples are quiet, so I'm gonna start with a very quiet mapping.
 
-  // start by taking out DC bias.  This will make negative #s...
+  // start by taking out DC bias.  This will our sample -512 to 511.
   mapped_sample = input - TIME_SAMPLE_BIAS;
-
-  // Now make this a 0-31 number.  
 
   // add in gain.
   mapped_sample = mapped_sample / gain;
